@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+raw/
+_shots/
+pitch/
+*.webm
+before-after*.jpg
+.env
