@@ -16,11 +16,16 @@ def score(url):
         h = r.read(600000).decode('utf-8', 'replace'); final = r.geturl()
     except Exception as e:
         return (-1, url, 'ERROR ' + str(e)[:60])
+    return score_html(h, final)
+
+
+def score_html(h, final):
     s, f = 0, []
-    if 'name="viewport"' not in h and "name='viewport'" not in h: s += 3; f.append('no-viewport')
+    if not re.search(r'<meta[^>]*\bname\s*=\s*["\']?viewport', h, re.I): s += 3; f.append('no-viewport')
     t = len(re.findall(r'<table', h, re.I))
     if t > 3: s += 2; f.append(f'tables:{t}')
-    yrs = [int(y) for y in re.findall(r'(?:©|&copy;|copyright)\D{0,15}((?:19|20)\d\d)', h, re.I)]
+    # take the end of a range: "© 2008 - 2025" -> 2025
+    yrs = [int(y) for m in re.findall(r'(?:©|&copy;|copyright)\D{0,15}((?:19|20)\d\d)(?:\s*(?:-|–|&ndash;|to)\s*((?:19|20)\d\d))?', h, re.I) for y in m if y]
     if yrs and max(yrs) < 2022: s += 2; f.append(f'©{max(yrs)}')
     jq = re.search(r'jquery[-.]?(\d)\.(\d+)', h, re.I)
     if jq and int(jq.group(1)) < 2: s += 1; f.append('old-jquery')

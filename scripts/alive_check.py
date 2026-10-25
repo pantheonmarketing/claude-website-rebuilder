@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 
 UA = {'User-Agent': 'Mozilla/5.0'}
 ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+SOCIAL = r'(?<![\w-])(?:facebook|instagram|tiktok|youtube|linkedin|twitter|x)\.com/[^"\'\s<>?#]+|line\.me/[^"\'\s<>?#]+|lin\.ee/[^"\'\s<>?#]+'
+SOCIAL_SKIP = r'lnwshop|sharer|/share|intent/|/plugins|/dialog|/tr$|\.(?:js|css|png|jpe?g|svg)$'
 TH_MONTHS = {'ม.ค.': 1, 'ก.พ.': 2, 'มี.ค.': 3, 'เม.ย.': 4, 'พ.ค.': 5, 'มิ.ย.': 6, 'ก.ค.': 7, 'ส.ค.': 8, 'ก.ย.': 9, 'ต.ค.': 10, 'พ.ย.': 11, 'ธ.ค.': 12}
 
 
@@ -25,7 +27,8 @@ def th_date(s):
 
 
 def rdap(host):
-    parts = host.split('.')
+    parts = (host or '').split('.')
+    if len(parts) < 2: return {'note': 'no public domain to look up'}
     if len(parts) > 2 and parts[-2] in ('lnwshop',): return {'note': 'subdomain of lnwshop.com, no own domain'}
     dom = '.'.join(parts[-3:]) if parts[-2] in ('co', 'in', 'or', 'ac', 'go') else '.'.join(parts[-2:])
     try:
@@ -61,11 +64,13 @@ def check(url):
     if m: out['lnw_last_update'] = th_date(m.group(1))
     m = re.search(r'เปิดร้าน\s*([^<]{6,20})', h)
     if m: out['lnw_opened'] = th_date(m.group(1))
-    yrs = [int(y) for y in re.findall(r'\b(20[0-2]\d)\b', h) if 2000 <= int(y) <= 2026]
-    th_yrs = [int(y) - 543 for y in re.findall(r'\b(25[4-6]\d)\b', h) if 2543 <= int(y) <= 2569]
+    now = datetime.now().year  # ignore future years (prices, phone fragments)
+    yrs = [int(y) for y in re.findall(r'\b(20\d\d)\b', h) if 2000 <= int(y) <= now]
+    th_yrs = [int(y) - 543 for y in re.findall(r'\b(25\d\d)\b', h) if 2543 <= int(y) <= now + 543]
     if yrs or th_yrs: out['newest_year_on_page'] = max(yrs + th_yrs)
-    socials = sorted(set(re.findall(r'(?:facebook\.com/[^"\'\s<>?]+|line\.me/[^"\'\s<>]+|lin\.ee/[^"\'\s<>]+|@[a-z0-9_.]{4,30}(?=[\s<"]))', h, re.I)))
-    out['social'] = [s for s in socials if 'lnwshop' not in s.lower() and 'sharer' not in s][:5]
+    # profile links only; bare @words in HTML are mostly CSS (@media), filenames (@2x.png) or JSON-LD (@type)
+    socials = sorted(set(s.rstrip('/') for s in re.findall(SOCIAL, h, re.I)))
+    out['social'] = [s for s in socials if not re.search(SOCIAL_SKIP, s, re.I)][:5]
     out.update(rdap(host)); out.update(cert(host))
     return out
 

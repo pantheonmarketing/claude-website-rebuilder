@@ -1,5 +1,5 @@
 """Verify a rebuilt site: full-page desktop + mobile screenshots of every page, horizontal-overflow
-check, console errors, and a screen recording of the homepage scroll.
+check, console errors, axe-core WCAG 2.2 A/AA check, and a screen recording of the homepage scroll.
 
 Usage:
   python shoot.py http://localhost:4812 index,services,portfolio,contact out_dir
@@ -10,6 +10,19 @@ import asyncio, os, sys
 from playwright.async_api import async_playwright
 
 REVEAL = "document.querySelectorAll('[data-aos]').forEach(e=>e.classList.add('aos-animate'));"
+AXE_URL = 'https://cdn.jsdelivr.net/npm/axe-core@4.10.2/axe.min.js'
+AXE_RUN = """axe.run(document, {runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']})
+  .then(r => ({review: r.incomplete.reduce((n, v) => n + v.nodes.length, 0),
+               v: r.violations.map(v => ({id: v.id, impact: v.impact, n: v.nodes.length, el: v.nodes[0].target.join(' ')}))}))"""
+
+
+async def a11y(pg):
+    """axe-core violations for the current page, or None if axe could not load (offline)."""
+    try:
+        await pg.add_script_tag(url=AXE_URL)
+        return await pg.evaluate(AXE_RUN)
+    except Exception:
+        return None
 
 
 async def main(base, pages, out):
@@ -30,7 +43,13 @@ async def main(base, pages, out):
                 await pg.evaluate('window.scrollTo(0,0)'); await pg.wait_for_timeout(2200)
                 ox = await pg.evaluate('document.documentElement.scrollWidth - innerWidth')
                 await pg.screenshot(path=os.path.join(out, f'{name}-{page}.png'), full_page=True)
-                print(f'{name:8} {page:12} overflowX={ox}' + ('   <-- FIX' if ox > 0 else ''))
+                r = await a11y(pg)
+                v = None if r is None else r['v']
+                # "review" = items axe could not decide (often contrast over images or overlapping layers): check these by eye
+                ax = 'a11y=SKIPPED (axe-core did not load)' if r is None else f'a11y={len(v)}  review={r["review"]}'
+                print(f'{name:8} {page:12} overflowX={ox}  {ax}' + ('   <-- FIX' if ox > 0 or v else ''))
+                for x in v or []:
+                    print(f'    {x["impact"]:9} {x["id"]} ({x["n"]}x) e.g. {x["el"]}')
             print(f'{name} console errors: {errs or "none"}')
             await ctx.close()
         ctx = await b.new_context(viewport={'width': 1440, 'height': 900}, record_video_dir=os.path.join(out, '_vid'))
